@@ -208,6 +208,9 @@ pub struct StyleSheet<'a> {
     pub rules: Vec<Rule<'a>>,
 }
 
+/// ident, pre-block content, block content
+pub type AtRuleCallback = alloc::boxed::Box<dyn FnMut(&str, &str, &str)>;
+
 impl<'a> StyleSheet<'a> {
     /// Creates an empty style sheet.
     pub fn new() -> Self {
@@ -225,12 +228,27 @@ impl<'a> StyleSheet<'a> {
     /// All warnings will be logged.
     pub fn parse(text: &'a str) -> Self {
         let mut sheet = StyleSheet::new();
-        sheet.parse_more(text);
+        sheet.parse_more(text, None);
+        sheet
+    }
+
+    /// Parses a style sheet from text.
+    ///
+    /// At-rules will be passed into the provided callback (ident, pre-block, block)
+    ///
+    /// # Errors
+    ///
+    /// Doesn't produce any errors. In worst case scenario will return an empty stylesheet.
+    ///
+    /// All warnings will be logged.
+    pub fn parse_with_at_callback(text: &'a str, at_rule_callback: AtRuleCallback) -> Self {
+        let mut sheet = StyleSheet::new();
+        sheet.parse_more(text, Some(at_rule_callback));
         sheet
     }
 
     /// Parses a style sheet from a text to the current style sheet.
-    pub fn parse_more(&mut self, text: &'a str) {
+    pub fn parse_more(&mut self, text: &'a str, mut at_rule_callback: Option<AtRuleCallback>) {
         let mut s = Stream::from(text);
 
         if s.skip_spaces_and_comments().is_err() {
@@ -242,7 +260,7 @@ impl<'a> StyleSheet<'a> {
                 break;
             }
 
-            let _ = consume_statement(&mut s, &mut self.rules);
+            let _ = consume_statement(&mut s, &mut self.rules, at_rule_callback.as_mut());
         }
 
         if !s.at_end() {
@@ -286,26 +304,72 @@ impl Default for StyleSheet<'_> {
     }
 }
 
-fn consume_statement<'a>(s: &mut Stream<'a>, rules: &mut Vec<Rule<'a>>) -> Result<(), Error> {
+fn consume_statement<'a>(s: &mut Stream<'a>, rules: &mut Vec<Rule<'a>>, at_rule_callback: Option<&mut AtRuleCallback>) -> Result<(), Error> {
     if s.curr_byte() == Ok(b'@') {
         s.advance(1);
-        consume_at_rule(s)
+        consume_at_rule(s, at_rule_callback)
     } else {
         consume_rule_set(s, rules)
     }
 }
 
-fn consume_at_rule(s: &mut Stream<'_>) -> Result<(), Error> {
+fn consume_at_rule(s: &mut Stream<'_>, callback: Option<&mut AtRuleCallback>) -> Result<(), Error> {
     let ident = s.consume_ident()?;
-    warn!("The @{} rule is not supported. Skipped.", ident);
+    
+    if let Some(callback) = callback {
+        let pre_block = s.consume_bytes(|c| c != b';' && c != b'{');
+        
+        match s.curr_byte()? {
+            b';' => {
+                s.advance(1);
+                callback(ident, pre_block, "");
+            },
+            b'{' => {
+                // is there a way to do this without allocating?
+                let mut block = alloc::string::String::new();
+                if s.try_consume_byte(b'{') {
+                    block.push('{');
+                };
 
-    s.skip_bytes(|c| c != b';' && c != b'{');
+                let mut braces = 0;
+                while !s.at_end() {
+                    match s.curr_byte_unchecked() {
+                        b'{' => {
+                            block.push('{');
+                            braces += 1;
+                        }
+                        b'}' => {
+                            block.push('}');
+                            if braces == 0 {
+                                break;
+                            } else {
+                                braces -= 1;
+                            }
+                        }
+                        other => block.push(other as char),
+                    }
 
-    match s.curr_byte()? {
-        b';' => s.advance(1),
-        b'{' => consume_block(s),
-        _ => {}
+                    s.advance(1);
+                }
+
+                s.try_consume_byte(b'}');
+
+                callback(ident, pre_block, &block);
+            },
+            _ => {}
+        }
+        
+    } else {
+        warn!("The @{} rule is not supported. Skipped.", ident);
+        s.skip_bytes(|c| c != b';' && c != b'{');
+        match s.curr_byte()? {
+            b';' => s.advance(1),
+            b'{' => consume_block(s),
+            _ => {}
+        }
     }
+
+
 
     Ok(())
 }

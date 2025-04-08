@@ -145,3 +145,41 @@ fn style_21() {
     let style = StyleSheet::parse(":le>*");
     assert_eq!(style.to_string(), "");
 }
+
+#[test]
+fn style_22() {
+    let style = StyleSheet::parse_with_at_callback(
+        "\
+@media screen {
+    p:before { content: 'Hello'; }
+}
+a { color:red }",
+        Box::new(|ident, name, content| {
+            assert_eq!(ident, "media");
+            assert_eq!(name, " screen ");
+            assert_eq!(content, "{\n    p:before { content: 'Hello'; }\n}");
+        })
+    );
+    assert_eq!(style.to_string(), "a { color:red; }");
+}
+
+#[test]
+fn style_23() {
+    let style = StyleSheet::parse_with_at_callback(
+        "\
+@keyframes test-anim {
+    from { color: red; }
+    to { color: blue; }
+}
+a { color:red }",
+        Box::new(|ident, name, content| {
+            assert_eq!(ident, "keyframes");
+            assert_eq!(name, " test-anim ");
+            assert_eq!(content, r#"{
+    from { color: red; }
+    to { color: blue; }
+}"#);
+        })
+    );
+    assert_eq!(style.to_string(), "a { color:red; }");
+}
