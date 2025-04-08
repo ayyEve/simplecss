@@ -327,9 +327,7 @@ fn consume_at_rule(s: &mut Stream<'_>, callback: Option<&mut AtRuleCallback>) ->
             b'{' => {
                 // is there a way to do this without allocating?
                 let mut block = alloc::string::String::new();
-                if s.try_consume_byte(b'{') {
-                    block.push('{');
-                };
+                s.try_consume_byte(b'{');
 
                 let mut braces = 0;
                 while !s.at_end() {
@@ -339,10 +337,10 @@ fn consume_at_rule(s: &mut Stream<'_>, callback: Option<&mut AtRuleCallback>) ->
                             braces += 1;
                         }
                         b'}' => {
-                            block.push('}');
                             if braces == 0 {
                                 break;
                             } else {
+                                block.push('}');
                                 braces -= 1;
                             }
                         }

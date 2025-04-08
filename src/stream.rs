@@ -120,12 +120,9 @@ impl<'a> Stream<'a> {
         Ok(())
     }
 
-    pub fn try_consume_byte(&mut self, c: u8) -> bool {
+    pub fn try_consume_byte(&mut self, c: u8) {
         if self.curr_byte() == Ok(c) {
             self.advance(1);
-            true
-        } else {
-            false
         }
     }
 
