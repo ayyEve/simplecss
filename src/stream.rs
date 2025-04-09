@@ -6,25 +6,27 @@ use core::str;
 use crate::{Error, TextPos};
 
 trait CssCharExt {
-    fn is_name_start(&self) -> bool;
-    fn is_name_char(&self) -> bool;
+    fn is_name_start(&self, allow_numbers: bool) -> bool;
+    fn is_name_char(&self, allow_numbers: bool) -> bool;
     fn is_non_ascii(&self) -> bool;
     fn is_escape(&self) -> bool;
 }
 
 impl CssCharExt for char {
     #[inline]
-    fn is_name_start(&self) -> bool {
+    fn is_name_start(&self, allow_numbers: bool) -> bool {
         match *self {
             '_' | 'a'..='z' | 'A'..='Z' => true,
+            '0'..='9' => allow_numbers,
             _ => self.is_non_ascii() || self.is_escape(),
         }
     }
 
     #[inline]
-    fn is_name_char(&self) -> bool {
+    fn is_name_char(&self, allow_numbers: bool) -> bool {
         match *self {
             '_' | 'a'..='z' | 'A'..='Z' | '0'..='9' | '-' => true,
+            '%' => allow_numbers,
             _ => self.is_non_ascii() || self.is_escape(),
         }
     }
@@ -185,7 +187,7 @@ impl<'a> Stream<'a> {
         Ok(())
     }
 
-    pub fn consume_ident(&mut self) -> Result<&'a str, Error> {
+    pub fn consume_ident(&mut self, allow_numbers: bool) -> Result<&'a str, Error> {
         let start = self.pos();
 
         if self.curr_byte() == Ok(b'-') {
@@ -194,7 +196,7 @@ impl<'a> Stream<'a> {
 
         let mut iter = self.chars();
         if let Some(c) = iter.next() {
-            if c.is_name_start() {
+            if c.is_name_start(allow_numbers) {
                 self.advance(c.len_utf8());
             } else {
                 return Err(Error::InvalidIdent(self.gen_text_pos_from(start)));
@@ -202,7 +204,7 @@ impl<'a> Stream<'a> {
         }
 
         for c in iter {
-            if c.is_name_char() {
+            if c.is_name_char(allow_numbers) {
                 self.advance(c.len_utf8());
             } else {
                 break;
@@ -248,7 +250,7 @@ impl<'a> Stream<'a> {
 
             Ok(value)
         } else {
-            self.consume_ident()
+            self.consume_ident(false)
         }
     }
 

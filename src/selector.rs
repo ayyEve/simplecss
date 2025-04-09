@@ -500,19 +500,19 @@ impl<'a> Iterator for SelectorTokenizer<'a> {
             b'#' => {
                 self.after_combinator = false;
                 self.stream.advance(1);
-                let ident = try2!(self.stream.consume_ident());
+                let ident = try2!(self.stream.consume_ident(false));
                 Some(Ok(SelectorToken::IdSelector(ident)))
             }
             b'.' => {
                 self.after_combinator = false;
                 self.stream.advance(1);
-                let ident = try2!(self.stream.consume_ident());
+                let ident = try2!(self.stream.consume_ident(false));
                 Some(Ok(SelectorToken::ClassSelector(ident)))
             }
             b'[' => {
                 self.after_combinator = false;
                 self.stream.advance(1);
-                let ident = try2!(self.stream.consume_ident());
+                let ident = try2!(self.stream.consume_ident(false));
 
                 let op = match try2!(self.stream.curr_byte()) {
                     b']' => AttributeOperator::Exists,
@@ -546,7 +546,7 @@ impl<'a> Iterator for SelectorTokenizer<'a> {
             b':' => {
                 self.after_combinator = false;
                 self.stream.advance(1);
-                let ident = try2!(self.stream.consume_ident());
+                let ident = try2!(self.stream.consume_ident(false));
 
                 if ident == "lang" {
                     try2!(self.stream.consume_byte(b'('));
@@ -625,7 +625,7 @@ impl<'a> Iterator for SelectorTokenizer<'a> {
                 self.next()
             }
             _ => {
-                let ident = try2!(self.stream.consume_ident());
+                let ident = try2!(self.stream.consume_ident(true));
 
                 if !self.after_combinator {
                     self.finished = true;

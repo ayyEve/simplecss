@@ -321,7 +321,7 @@ fn consume_statement<'a, F: FnMut(&str, &str, &str)>(s: &mut Stream<'a>, rules: 
 }
 
 fn consume_at_rule<F: FnMut(&str, &str, &str)>(s: &mut Stream<'_>, callback: Option<&mut F>) -> Result<(), Error> {
-    let ident = s.consume_ident()?;
+    let ident = s.consume_ident(false)?;
     
     if let Some(callback) = callback {
         let pre_block = s.consume_bytes(|c| c != b';' && c != b'{');
@@ -333,6 +333,7 @@ fn consume_at_rule<F: FnMut(&str, &str, &str)>(s: &mut Stream<'_>, callback: Opt
             },
             b'{' => {
                 // is there a way to do this without allocating?
+                // could do it with events?
                 let mut block = alloc::string::String::new();
                 s.try_consume_byte(b'{');
 
@@ -373,8 +374,6 @@ fn consume_at_rule<F: FnMut(&str, &str, &str)>(s: &mut Stream<'_>, callback: Opt
             _ => {}
         }
     }
-
-
 
     Ok(())
 }
@@ -523,7 +522,7 @@ fn consume_declaration<'a>(s: &mut Stream<'a>) -> Result<Declaration<'a>, Error>
         s.advance(1);
     }
 
-    let name = s.consume_ident()?;
+    let name = s.consume_ident(false)?;
 
     s.skip_spaces_and_comments()?;
     s.consume_byte(b':')?;
@@ -581,7 +580,7 @@ fn consume_term(s: &mut Stream<'_>) -> Result<(), Error> {
     match s.curr_byte()? {
         b'#' => {
             s.advance(1);
-            match s.consume_ident() {
+            match s.consume_ident(false) {
                 Ok(_) => {}
                 Err(_) => {
                     // Try consume as a hex color.
@@ -608,7 +607,7 @@ fn consume_term(s: &mut Stream<'_>) -> Result<(), Error> {
                 s.advance(1);
             } else {
                 // Consume suffix if any.
-                let _ = s.consume_ident();
+                let _ = s.consume_ident(false);
             }
         }
         b'\'' | b'"' => {
@@ -618,7 +617,7 @@ fn consume_term(s: &mut Stream<'_>) -> Result<(), Error> {
             s.advance(1);
         }
         _ => {
-            let _ = s.consume_ident()?;
+            let _ = s.consume_ident(false)?;
 
             // Consume function.
             if s.curr_byte() == Ok(b'(') {
