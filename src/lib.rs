@@ -211,6 +211,7 @@ pub struct StyleSheet<'a> {
 /// ident, pre-block content, block content
 pub type AtRuleCallback = alloc::boxed::Box<dyn FnMut(&str, &str, &str)>;
 
+
 impl<'a> StyleSheet<'a> {
     /// Creates an empty style sheet.
     pub fn new() -> Self {
@@ -228,7 +229,7 @@ impl<'a> StyleSheet<'a> {
     /// All warnings will be logged.
     pub fn parse(text: &'a str) -> Self {
         let mut sheet = StyleSheet::new();
-        sheet.parse_more(text, None);
+        sheet.parse_more(text);
         sheet
     }
 
@@ -241,14 +242,19 @@ impl<'a> StyleSheet<'a> {
     /// Doesn't produce any errors. In worst case scenario will return an empty stylesheet.
     ///
     /// All warnings will be logged.
-    pub fn parse_with_at_callback(text: &'a str, at_rule_callback: AtRuleCallback) -> Self {
+    pub fn parse_with_at_callback<F: FnMut(&str, &str, &str)>(text: &'a str, at_rule_callback: F) -> Self {
         let mut sheet = StyleSheet::new();
-        sheet.parse_more(text, Some(at_rule_callback));
+        sheet.parse_more_with_callback(text, Some(at_rule_callback));
         sheet
     }
 
     /// Parses a style sheet from a text to the current style sheet.
-    pub fn parse_more(&mut self, text: &'a str, mut at_rule_callback: Option<AtRuleCallback>) {
+    pub fn parse_more(&mut self, text: &'a str) {
+        self.parse_more_with_callback(text, None::<fn(&str, &str, &str)>);
+    }
+
+    /// Parses a style sheet from a text to the current style sheet.
+    pub fn parse_more_with_callback<F: FnMut(&str, &str, &str)>(&mut self, text: &'a str, mut at_rule_callback: Option<F>) {
         let mut s = Stream::from(text);
 
         if s.skip_spaces_and_comments().is_err() {
@@ -274,6 +280,7 @@ impl<'a> StyleSheet<'a> {
         self.rules
             .sort_by_cached_key(|rule| rule.selector.specificity());
     }
+
 }
 
 impl fmt::Display for StyleSheet<'_> {
@@ -304,7 +311,7 @@ impl Default for StyleSheet<'_> {
     }
 }
 
-fn consume_statement<'a>(s: &mut Stream<'a>, rules: &mut Vec<Rule<'a>>, at_rule_callback: Option<&mut AtRuleCallback>) -> Result<(), Error> {
+fn consume_statement<'a, F: FnMut(&str, &str, &str)>(s: &mut Stream<'a>, rules: &mut Vec<Rule<'a>>, at_rule_callback: Option<&mut F>) -> Result<(), Error> {
     if s.curr_byte() == Ok(b'@') {
         s.advance(1);
         consume_at_rule(s, at_rule_callback)
@@ -313,7 +320,7 @@ fn consume_statement<'a>(s: &mut Stream<'a>, rules: &mut Vec<Rule<'a>>, at_rule_
     }
 }
 
-fn consume_at_rule(s: &mut Stream<'_>, callback: Option<&mut AtRuleCallback>) -> Result<(), Error> {
+fn consume_at_rule<F: FnMut(&str, &str, &str)>(s: &mut Stream<'_>, callback: Option<&mut F>) -> Result<(), Error> {
     let ident = s.consume_ident()?;
     
     if let Some(callback) = callback {
