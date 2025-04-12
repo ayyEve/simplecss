@@ -79,6 +79,7 @@ clippy.wildcard_dependencies = "warn"
 [features]
 default = ["std"]
 std = ["log/std"]
+at_rules = []
 
 [dependencies]
 log = { version = "0.4.22", default-features = false }

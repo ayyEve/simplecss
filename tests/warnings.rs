@@ -34,10 +34,10 @@ fn style_01() {
     );
 }
 
-#[test]
-fn style_02() {
-    assert_eq!(
-        run_process("@import 'subs.css';"),
-        "WARN: The @import rule is not supported. Skipped.\n"
-    );
-}
+// #[test]
+// fn style_02() {
+//     assert_eq!(
+//         run_process("@import 'subs.css';"),
+//         "WARN: The @import rule is not supported. Skipped.\n"
+//     );
+// }

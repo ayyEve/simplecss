@@ -63,11 +63,16 @@ use core::fmt;
 
 use log::warn;
 
+/// Module containing everything needed for @rules
+#[cfg(feature="at_rules")]
+pub mod at_rules;
 mod selector;
 mod stream;
 
 pub use selector::*;
 use stream::Stream;
+#[cfg(feature="at_rules")]
+use at_rules::at_rule::AtRule;
 
 /// A list of possible errors.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -193,7 +198,7 @@ pub struct Declaration<'a> {
 }
 
 /// A rule.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Rule<'a> {
     /// A rule selector.
     pub selector: Selector<'a>,
@@ -202,20 +207,26 @@ pub struct Rule<'a> {
 }
 
 /// A style sheet.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StyleSheet<'a> {
     /// A list of rules.
     pub rules: Vec<Rule<'a>>,
+    /// A list of At Rules
+    #[cfg(feature="at_rules")]
+    pub at_rules: Vec<AtRule<'a>>,
 }
 
 /// ident, pre-block content, block content
 pub type AtRuleCallback = alloc::boxed::Box<dyn FnMut(&str, &str, &str)>;
 
-
 impl<'a> StyleSheet<'a> {
     /// Creates an empty style sheet.
     pub fn new() -> Self {
-        StyleSheet { rules: Vec::new() }
+        StyleSheet {
+            rules: Vec::new(),
+            #[cfg(feature="at_rules")]
+            at_rules: Vec::new(),
+        }
     }
 
     /// Parses a style sheet from text.
@@ -233,28 +244,8 @@ impl<'a> StyleSheet<'a> {
         sheet
     }
 
-    /// Parses a style sheet from text.
-    ///
-    /// At-rules will be passed into the provided callback (ident, pre-block, block)
-    ///
-    /// # Errors
-    ///
-    /// Doesn't produce any errors. In worst case scenario will return an empty stylesheet.
-    ///
-    /// All warnings will be logged.
-    pub fn parse_with_at_callback<F: FnMut(&str, &str, &str)>(text: &'a str, at_rule_callback: F) -> Self {
-        let mut sheet = StyleSheet::new();
-        sheet.parse_more_with_callback(text, Some(at_rule_callback));
-        sheet
-    }
-
     /// Parses a style sheet from a text to the current style sheet.
     pub fn parse_more(&mut self, text: &'a str) {
-        self.parse_more_with_callback(text, None::<fn(&str, &str, &str)>);
-    }
-
-    /// Parses a style sheet from a text to the current style sheet.
-    pub fn parse_more_with_callback<F: FnMut(&str, &str, &str)>(&mut self, text: &'a str, mut at_rule_callback: Option<F>) {
         let mut s = Stream::from(text);
 
         if s.skip_spaces_and_comments().is_err() {
@@ -266,7 +257,12 @@ impl<'a> StyleSheet<'a> {
                 break;
             }
 
-            let _ = consume_statement(&mut s, &mut self.rules, at_rule_callback.as_mut());
+            let _ = consume_statement(
+                &mut s, 
+                &mut self.rules, 
+                #[cfg(feature="at_rules")]
+                &mut self.at_rules
+            );
         }
 
         if !s.at_end() {
@@ -280,7 +276,6 @@ impl<'a> StyleSheet<'a> {
         self.rules
             .sort_by_cached_key(|rule| rule.selector.specificity());
     }
-
 }
 
 impl fmt::Display for StyleSheet<'_> {
@@ -311,71 +306,88 @@ impl Default for StyleSheet<'_> {
     }
 }
 
-fn consume_statement<'a, F: FnMut(&str, &str, &str)>(s: &mut Stream<'a>, rules: &mut Vec<Rule<'a>>, at_rule_callback: Option<&mut F>) -> Result<(), Error> {
+fn consume_statement<'a>(
+    s: &mut Stream<'a>,
+    rules: &mut Vec<Rule<'a>>,
+
+    #[cfg(feature="at_rules")]
+    at_rules: &mut Vec<AtRule<'a>>,
+) -> Result<(), Error> {
     if s.curr_byte() == Ok(b'@') {
         s.advance(1);
-        consume_at_rule(s, at_rule_callback)
+        consume_at_rule(s, #[cfg(feature="at_rules")] at_rules)
     } else {
         consume_rule_set(s, rules)
     }
 }
 
-fn consume_at_rule<F: FnMut(&str, &str, &str)>(s: &mut Stream<'_>, callback: Option<&mut F>) -> Result<(), Error> {
-    let ident = s.consume_ident(false)?;
-    
-    if let Some(callback) = callback {
-        let pre_block = s.consume_bytes(|c| c != b';' && c != b'{');
-        
-        match s.curr_byte()? {
-            b';' => {
-                s.advance(1);
-                callback(ident, pre_block, "");
-            },
-            b'{' => {
-                // is there a way to do this without allocating?
-                // could do it with events?
-                let mut block = alloc::string::String::new();
-                s.try_consume_byte(b'{');
+#[cfg(feature="at_rules")]
+fn consume_at_rule<'a>(s: &mut Stream<'a>, rules: &mut Vec<AtRule<'a>>) -> Result<(), Error> {
+    #[cfg(test)]
+    match AtRule::consume(s) {
+        Ok(r) => rules.push(r),
+        #[allow(clippy::print_stderr)] 
+        Err(e) => std::eprintln!("{e}"),
+    }
 
-                let mut braces = 0;
-                while !s.at_end() {
-                    match s.curr_byte_unchecked() {
-                        b'{' => {
-                            block.push('{');
-                            braces += 1;
-                        }
-                        b'}' => {
-                            if braces == 0 {
-                                break;
-                            } else {
-                                block.push('}');
-                                braces -= 1;
-                            }
-                        }
-                        other => block.push(other as char),
-                    }
+    #[cfg(not(test))]
+    rules.push(AtRule::consume(s)?);
+    Ok(())
+}
 
-                    s.advance(1);
-                }
+#[cfg(not(feature="at_rules"))]
+fn consume_at_rule(s: &mut Stream<'_>) -> Result<(), Error> {
+    s.consume_bytes(|b| b != b'{' && b != b';');
+    s.skip_spaces_and_comments()?;
 
-                s.try_consume_byte(b'}');
-
-                callback(ident, pre_block, &block);
-            },
-            _ => {}
-        }
-        
+    if s.curr_byte()? == b'{' {
+        s.advance(1);
+        consume_until_block_end(s);
+        s.skip_spaces_and_comments()?;
+        s.try_consume_byte(b'}');
     } else {
-        warn!("The @{} rule is not supported. Skipped.", ident);
-        s.skip_bytes(|c| c != b';' && c != b'{');
-        match s.curr_byte()? {
-            b';' => s.advance(1),
-            b'{' => consume_block(s),
-            _ => {}
-        }
+        s.try_consume_byte(b';');
     }
 
     Ok(())
+}
+
+#[cfg(feature="at_rules")]
+fn read_block<'a>(s: &mut Stream<'a>, include_braces: bool) -> &'a str {
+    let mut start = s.pos();
+    let mut end = start;
+
+    s.try_consume_byte(b'{');
+    if !include_braces {
+        start += 1;
+    }
+
+    let mut braces = 0;
+    while !s.at_end() {
+        match s.curr_byte_unchecked() {
+            b'{' => {
+                end += 1;
+                braces += 1;
+            }
+            b'}' => {
+                if braces == 0 {
+                    if include_braces {
+                        end += 1;
+                    }
+                    break;
+                } else {
+                    braces -= 1;
+                }
+            }
+            _ => {}
+        }
+        end += 1;
+        s.advance(1);
+    }
+
+    s.try_consume_byte(b'}');
+
+    s.slice_range(start, end)
 }
 
 fn consume_rule_set<'a>(s: &mut Stream<'a>, rules: &mut Vec<Rule<'a>>) -> Result<(), Error> {
@@ -417,11 +429,6 @@ fn consume_rule_set<'a>(s: &mut Stream<'a>, rules: &mut Vec<Rule<'a>>) -> Result
     s.try_consume_byte(b'}');
 
     Ok(())
-}
-
-fn consume_block(s: &mut Stream<'_>) {
-    s.try_consume_byte(b'{');
-    consume_until_block_end(s);
 }
 
 fn consume_until_block_end(s: &mut Stream<'_>) {
@@ -522,7 +529,7 @@ fn consume_declaration<'a>(s: &mut Stream<'a>) -> Result<Declaration<'a>, Error>
         s.advance(1);
     }
 
-    let name = s.consume_ident(false)?;
+    let name = s.consume_ident()?;
 
     s.skip_spaces_and_comments()?;
     s.consume_byte(b':')?;
@@ -530,12 +537,13 @@ fn consume_declaration<'a>(s: &mut Stream<'a>) -> Result<Declaration<'a>, Error>
 
     // Parse value.
     let start = s.pos();
-    let mut end = s.pos();
-    while consume_term(s).is_ok() {
-        end = s.pos();
-        s.skip_spaces_and_comments()?;
-    }
-    let value = s.slice_range(start, end).trim();
+    let value = consume_value(s)?;
+    // let mut end = s.pos();
+    // while consume_term(s).is_ok() {
+    //     end = s.pos();
+    //     s.skip_spaces_and_comments()?;
+    // }
+    // let value = s.slice_range(start, end).trim();
 
     s.skip_spaces_and_comments()?;
 
@@ -580,7 +588,7 @@ fn consume_term(s: &mut Stream<'_>) -> Result<(), Error> {
     match s.curr_byte()? {
         b'#' => {
             s.advance(1);
-            match s.consume_ident(false) {
+            match s.consume_ident() {
                 Ok(_) => {}
                 Err(_) => {
                     // Try consume as a hex color.
@@ -607,7 +615,7 @@ fn consume_term(s: &mut Stream<'_>) -> Result<(), Error> {
                 s.advance(1);
             } else {
                 // Consume suffix if any.
-                let _ = s.consume_ident(false);
+                let _ = s.consume_ident();
             }
         }
         b'\'' | b'"' => {
@@ -617,7 +625,7 @@ fn consume_term(s: &mut Stream<'_>) -> Result<(), Error> {
             s.advance(1);
         }
         _ => {
-            let _ = s.consume_ident(false)?;
+            let _ = s.consume_ident()?;
 
             // Consume function.
             if s.curr_byte() == Ok(b'(') {
@@ -628,4 +636,14 @@ fn consume_term(s: &mut Stream<'_>) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+fn consume_value<'a>(s: &mut Stream<'a>) -> Result<&'a str, Error> {
+    let start = s.pos();
+    let mut end = s.pos();
+    while consume_term(s).is_ok() {
+        end = s.pos();
+        s.skip_spaces_and_comments()?;
+    }
+    Ok(s.slice_range(start, end).trim())
 }

@@ -100,7 +100,7 @@ enum SubSelector<'a> {
     PseudoClass(PseudoClass<'a>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct SimpleSelector<'a> {
     kind: SimpleSelectorType<'a>,
     subselectors: Vec<SubSelector<'a>>,
@@ -114,17 +114,17 @@ enum Combinator {
     AdjacentSibling,
 }
 
-#[derive(Clone, Debug)]
-struct Component<'a> {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Component<'a> {
     /// A combinator that precede the selector.
     combinator: Combinator,
     selector: SimpleSelector<'a>,
 }
 
 /// A selector.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Selector<'a> {
-    components: Vec<Component<'a>>,
+    pub(crate) components: Vec<Component<'a>>,
 }
 
 impl<'a> Selector<'a> {
@@ -500,19 +500,19 @@ impl<'a> Iterator for SelectorTokenizer<'a> {
             b'#' => {
                 self.after_combinator = false;
                 self.stream.advance(1);
-                let ident = try2!(self.stream.consume_ident(false));
+                let ident = try2!(self.stream.consume_ident());
                 Some(Ok(SelectorToken::IdSelector(ident)))
             }
             b'.' => {
                 self.after_combinator = false;
                 self.stream.advance(1);
-                let ident = try2!(self.stream.consume_ident(false));
+                let ident = try2!(self.stream.consume_ident());
                 Some(Ok(SelectorToken::ClassSelector(ident)))
             }
             b'[' => {
                 self.after_combinator = false;
                 self.stream.advance(1);
-                let ident = try2!(self.stream.consume_ident(false));
+                let ident = try2!(self.stream.consume_ident());
 
                 let op = match try2!(self.stream.curr_byte()) {
                     b']' => AttributeOperator::Exists,
@@ -546,7 +546,7 @@ impl<'a> Iterator for SelectorTokenizer<'a> {
             b':' => {
                 self.after_combinator = false;
                 self.stream.advance(1);
-                let ident = try2!(self.stream.consume_ident(false));
+                let ident = try2!(self.stream.consume_ident());
 
                 if ident == "lang" {
                     try2!(self.stream.consume_byte(b'('));
@@ -625,7 +625,13 @@ impl<'a> Iterator for SelectorTokenizer<'a> {
                 self.next()
             }
             _ => {
-                let ident = try2!(self.stream.consume_ident(true));
+
+                // some at rules have weird idents... 
+                #[cfg(feature="at_rules")]
+                let ident = try2!(self.stream.consume_ident_special());
+                
+                #[cfg(not(feature="at_rules"))]
+                let ident = try2!(self.stream.consume_ident());
 
                 if !self.after_combinator {
                     self.finished = true;

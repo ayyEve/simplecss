@@ -6,30 +6,31 @@ use core::str;
 use crate::{Error, TextPos};
 
 trait CssCharExt {
-    fn is_name_start(&self, allow_numbers: bool) -> bool;
-    fn is_name_char(&self, allow_numbers: bool) -> bool;
+    fn is_name_start(&self) -> bool;
+    fn is_name_char(&self) -> bool;
+
     fn is_non_ascii(&self) -> bool;
     fn is_escape(&self) -> bool;
 }
 
 impl CssCharExt for char {
     #[inline]
-    fn is_name_start(&self, allow_numbers: bool) -> bool {
+    fn is_name_start(&self) -> bool {
         match *self {
             '_' | 'a'..='z' | 'A'..='Z' => true,
-            '0'..='9' => allow_numbers,
             _ => self.is_non_ascii() || self.is_escape(),
         }
     }
 
+
     #[inline]
-    fn is_name_char(&self, allow_numbers: bool) -> bool {
+    fn is_name_char(&self) -> bool {
         match *self {
             '_' | 'a'..='z' | 'A'..='Z' | '0'..='9' | '-' => true,
-            '%' => allow_numbers,
             _ => self.is_non_ascii() || self.is_escape(),
         }
     }
+
 
     #[inline]
     fn is_non_ascii(&self) -> bool {
@@ -40,6 +41,31 @@ impl CssCharExt for char {
     fn is_escape(&self) -> bool {
         // TODO: this
         false
+    }
+}
+
+
+#[cfg(feature="at_rules")]
+trait CssCharExtAtRules {
+    fn is_name_start_special(&self) -> bool;
+    fn is_name_char_special(&self) -> bool;
+}
+#[cfg(feature="at_rules")]
+impl CssCharExtAtRules for char {
+
+    #[inline]
+    fn is_name_start_special(&self) -> bool {
+        match *self {
+            '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9' => true,
+            _ => self.is_non_ascii() || self.is_escape(),
+        }
+    }
+    #[inline]
+    fn is_name_char_special(&self) -> bool {
+        match *self {
+            '_' | 'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '%' => true,
+            _ => self.is_non_ascii() || self.is_escape(),
+        }
     }
 }
 
@@ -187,7 +213,7 @@ impl<'a> Stream<'a> {
         Ok(())
     }
 
-    pub fn consume_ident(&mut self, allow_numbers: bool) -> Result<&'a str, Error> {
+    pub fn consume_ident(&mut self) -> Result<&'a str, Error> {
         let start = self.pos();
 
         if self.curr_byte() == Ok(b'-') {
@@ -196,7 +222,7 @@ impl<'a> Stream<'a> {
 
         let mut iter = self.chars();
         if let Some(c) = iter.next() {
-            if c.is_name_start(allow_numbers) {
+            if c.is_name_start() {
                 self.advance(c.len_utf8());
             } else {
                 return Err(Error::InvalidIdent(self.gen_text_pos_from(start)));
@@ -204,7 +230,7 @@ impl<'a> Stream<'a> {
         }
 
         for c in iter {
-            if c.is_name_char(allow_numbers) {
+            if c.is_name_char() {
                 self.advance(c.len_utf8());
             } else {
                 break;
@@ -250,7 +276,7 @@ impl<'a> Stream<'a> {
 
             Ok(value)
         } else {
-            self.consume_ident(false)
+            self.consume_ident()
         }
     }
 
@@ -315,5 +341,43 @@ impl<'a> Stream<'a> {
         }
 
         col
+    }
+}
+
+#[cfg(feature="at_rules")]
+impl<'a> Stream<'a> {
+    
+    /// consume idents with some special chars (namely idents that are a number, start with '-', or end with %)
+    /// only used by @ rules
+    pub fn consume_ident_special(&mut self) -> Result<&'a str, Error> {
+        let start = self.pos();
+        let mut iter = self.chars();
+        if let Some(c) = iter.next() {
+            if c.is_name_start_special() {
+                self.advance(c.len_utf8());
+            } else {
+                return Err(Error::InvalidIdent(self.gen_text_pos_from(start)));
+            }
+        }
+
+        for c in iter {
+            if c.is_name_char_special() {
+                self.advance(c.len_utf8());
+            } else {
+                break;
+            }
+        }
+
+        if start == self.pos() {
+            return Err(Error::InvalidIdent(self.gen_text_pos_from(start)));
+        }
+
+        let name = self.slice_back(start);
+        Ok(name)
+    }
+
+    /// helper fn in case you (i) need to reset the stream position
+    pub fn reset_pos(&mut self, pos: usize) {
+        self.pos = pos;
     }
 }
